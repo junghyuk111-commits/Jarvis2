@@ -1,0 +1,18 @@
+{
+  "name": "JARVIS",
+  "short_name": "자비스",
+  "description": "나만의 음성 비서",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060912",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
