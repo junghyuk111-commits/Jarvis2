@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#0a0e1a" />
+<title>JARVIS</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; min-height: 100vh; background: radial-gradient(circle at 50% 30%, #142033, #060912 70%);
+    color: #cfe6ff; font-family: -apple-system, "Segoe UI", "Apple SD Gothic Neo", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  h1 { font-size: 18px; letter-spacing: 6px; margin: 24px 0 4px; color: #5fd0ff; font-weight: 600; }
+  .sub { font-size: 12px; color: #6b86a8; margin-bottom: 14px; }
+  .log {
+    flex: 1; width: 100%; max-width: 520px; padding: 8px 18px 12px; overflow-y: auto;
+  }
+  .msg { margin: 10px 0; line-height: 1.5; font-size: 16px; }
+  .me { text-align: right; color: #9fe0ff; }
+  .me b, .ai b { display: block; font-size: 11px; opacity: .5; margin-bottom: 2px; }
+  .ai { color: #e8f3ff; }
+  .ai .bubble { background: rgba(50,120,200,.12); border: 1px solid rgba(95,208,255,.2); padding: 10px 14px; border-radius: 14px; display: inline-block; }
+  .footer { width: 100%; max-width: 520px; padding: 14px 18px calc(20px + env(safe-area-inset-bottom)); text-align: center; }
+  /* 아크 리액터 버튼 */
+  .orb {
+    width: 120px; height: 120px; border-radius: 50%; margin: 0 auto; border: none; cursor: pointer;
+    background: radial-gradient(circle at 50% 45%, #aef0ff 0%, #3da8e0 38%, #11427a 70%, #0a1830 100%);
+    box-shadow: 0 0 0 4px rgba(95,208,255,.15), 0 0 30px rgba(95,208,255,.45), inset 0 0 20px rgba(255,255,255,.4);
+    color: #042038; font-weight: 700; font-size: 15px; letter-spacing: 1px; transition: transform .15s;
+  }
+  .orb:active { transform: scale(.94); }
+  .orb.listening { animation: pulse 1s infinite; box-shadow: 0 0 0 4px rgba(95,208,255,.3), 0 0 50px rgba(95,208,255,.8); }
+  .orb.thinking { animation: spin 1.2s linear infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 4px rgba(95,208,255,.3), 0 0 35px rgba(95,208,255,.55);} 50% { box-shadow: 0 0 0 12px rgba(95,208,255,.08), 0 0 60px rgba(95,208,255,.9);} }
+  @keyframes spin { to { filter: hue-rotate(360deg);} }
+  .status { font-size: 13px; color: #7fa6cc; min-height: 18px; margin-top: 12px; }
+</style>
+</head>
+<body>
+  <h1>J A R V I S</h1>
+  <div class="sub">보스, 호출을 기다리는 중</div>
+  <div class="log" id="log"></div>
+  <div class="footer">
+    <button class="orb" id="orb">탭하여<br/>말하기</button>
+    <div class="status" id="status"></div>
+  </div>
+
+<script>
+const log = document.getElementById("log");
+const orb = document.getElementById("orb");
+const statusEl = document.getElementById("status");
+const history = []; // Claude에 보낼 대화 맥락
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) {
+  statusEl.textContent = "이 브라우저는 음성인식을 지원하지 않아요 (크롬 권장)";
+  orb.disabled = true;
+}
+
+function add(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "me" ? "me" : "ai");
+  div.innerHTML = (role === "me" ? "<b>보스</b>" : "<b>자비스</b>") +
+    (role === "me" ? text : '<span class="bubble">' + text + "</span>");
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// 입(브라우저 TTS) — 한국어 목소리 우선
+let voices = [];
+function loadVoices() { voices = speechSynthesis.getVoices(); }
+loadVoices();
+speechSynthesis.onvoiceschanged = loadVoices;
+function speak(text) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ko-KR";
+  const ko = voices.find(v => v.lang && v.lang.startsWith("ko"));
+  if (ko) u.voice = ko;
+  u.rate = 1.05;
+  speechSynthesis.speak(u);
+}
+
+// 두뇌 호출
+async function think(text) {
+  history.push({ role: "user", content: text });
+  orb.className = "orb thinking";
+  statusEl.textContent = "생각하는 중...";
+  try {
+    const res = await fetch("/api/jarvis", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: history }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const reply = data.reply || "...";
+    history.push({ role: "assistant", content: reply });
+    add("ai", reply);
+    speak(reply);
+    statusEl.textContent = "";
+  } catch (e) {
+    statusEl.textContent = "오류: " + e.message;
+  } finally {
+    orb.className = "orb";
+  }
+}
+
+// 귀(브라우저 STT)
+orb.addEventListener("click", () => {
+  const rec = new SR();
+  rec.lang = "ko-KR";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  orb.className = "orb listening";
+  statusEl.textContent = "듣고 있어요...";
+  rec.start();
+  rec.onresult = (ev) => {
+    const text = ev.results[0][0].transcript;
+    add("me", text);
+    think(text);
+  };
+  rec.onerror = (ev) => { statusEl.textContent = "마이크 오류: " + ev.error; orb.className = "orb"; };
+  rec.onend = () => { if (orb.className.includes("listening")) orb.className = "orb"; };
+});
+</script>
+</body>
+</html>
